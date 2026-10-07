@@ -28,19 +28,19 @@ int main() {
 
 	graphics::internal::registerPyramid(graphics::internal::Pyramid{
 		std::array<graphics::internal::Vertex, 4>{
-			graphics::internal::Vertex {{0.0f,  -18.0f, -60.0f}},
-			graphics::internal::Vertex {{-15.0f,  6.0f, -51.0f}},
-			graphics::internal::Vertex {{15.0f,  6.0f, -51.0f}},
-			graphics::internal::Vertex {{0.0f,  6.0f, -77.0f}},
+			graphics::internal::Vertex {{0.0f,  18.0f, -60.0f}},
+			graphics::internal::Vertex {{-15.0f,  -6.0f, -51.0f}},
+			graphics::internal::Vertex {{15.0f,  -6.0f, -51.0f}},
+			graphics::internal::Vertex {{0.0f,  -6.0f, -77.0f}},
 		}
 	});
 
 	graphics::internal::registerPyramid(graphics::internal::Pyramid{
 		std::array<graphics::internal::Vertex, 4>{
-			graphics::internal::Vertex {{0.0f,  -18.0f / 5, -60.0f / 5}},
-			graphics::internal::Vertex {{-15.0f / 5,  6.0f / 5, -51.0f / 5}},
-			graphics::internal::Vertex {{15.0f / 5,  6.0f / 5, -51.0f / 5}},
-			graphics::internal::Vertex {{0.0f,  6.0f / 5, -77.0f / 5}},
+			graphics::internal::Vertex {{0.0f,  18.0f / 5, -60.0f / 5}},
+			graphics::internal::Vertex {{-15.0f / 5,  -6.0f / 5, -51.0f / 5}},
+			graphics::internal::Vertex {{15.0f / 5,  -6.0f / 5, -51.0f / 5}},
+			graphics::internal::Vertex {{0.0f,  -6.0f / 5, -77.0f / 5}},
 		}
 	});
 

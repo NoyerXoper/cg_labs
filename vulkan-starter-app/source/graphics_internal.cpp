@@ -99,12 +99,12 @@ Pyramid::Pyramid(const std::array<Vertex, 4>& verticies): center_(0), verticies_
 		glm::vec3 center = (verticies_[v0].position + verticies_[v1].position + verticies_[v2].position) / 3.0f;
 
 		if (glm::dot(norm, center) > 0) {
-			indexes_[i] = v1;
-			indexes_[i + 1] = v0;
-			indexes_[i + 2] = v2;
-		} else {
 			indexes_[i] = v0;
 			indexes_[i + 1] = v1;
+			indexes_[i + 2] = v2;
+		} else {
+			indexes_[i] = v1;
+			indexes_[i + 1] = v0;
 			indexes_[i + 2] = v2;
 		}
 		i += 3;
@@ -180,7 +180,10 @@ glm::mat4 Pyramid::getDeformationMatrix() const {
 }
 
 glm::mat4 Pyramid::getPositionMatrix() const {
-	return glm::translate(glm::mat4(1), center_);
+	glm::mat4 mat =  glm::translate(glm::mat4(1), center_);
+	mat[1][1] *= -1;
+	mat[3][1] *= -1;
+	return mat;
 }
 
 glm::mat4 Pyramid::getModel() const {
@@ -233,9 +236,7 @@ VkCommandBuffer vk_imgui_command_buffer;
 std::vector<VkBuffer> vk_uniform_global_buffers;
 std::vector<GlobalUniforms*> vk_uniform_global_memory;
 std::vector<VmaAllocation> vk_uniform_buffer_global_allocations;
-uint32_t vk_uniform_global_memory_size;
 VkDescriptorSetLayout vk_descriptor_set_layout;
-VkDeviceSize uniform_buffer_align;
 VkDescriptorPool vk_uniform_buffer_descriptor_pool;
 // std::vector<VkDescriptorSet> vk_uniform_buffer_descriptor_set;
 

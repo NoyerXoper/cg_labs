@@ -28,19 +28,18 @@ void update([[maybe_unused]] double time) {
 	static constexpr float DEFAULT_SPEED = 0;
 	static constexpr float DEFAULT_RADIUS = 3;
 	static constexpr glm::vec3 DEFAULT_ANGLE_SPEED{};
-	static float prev_phase = 0;
 	static float prev = 0;
 	static auto& objects = graphics::internal::VertexIndexStorage::objectsData();
+	static std::vector<float> prev_phase (objects.size(), 0);
 	// ImGui::ShowDemoWindow();
 	static bool is_open_pos = false;
 	static bool is_open_color = false;
 	static bool is_select_open = false;
-	static bool is_playing_anim = false;
+	static std::vector<char> is_playing_anim(objects.size(), 0);
 	static std::size_t selected = 0;
 	if (objects.size() == 0) {
 		return;
 	}
-	graphics::internal::Pyramid& fst = *objects[selected];
 
 	static std::vector<float> speeds(objects.size(), DEFAULT_SPEED);
 	static std::vector<float> radiuses (objects.size(), DEFAULT_RADIUS);
@@ -65,9 +64,6 @@ void update([[maybe_unused]] double time) {
 				const bool is_selected = (selected == i);
 				std::string label = "Object " + std::to_string(i);
 				if (ImGui::Selectable(label.c_str(), is_selected)) {
-					if (selected != i) {
-						is_playing_anim = false;
-					}
 					selected = i;
 				}
 				if (is_selected) {
@@ -82,48 +78,51 @@ void update([[maybe_unused]] double time) {
 	if (is_open_pos) {
 		ImGui::Begin("Position", &is_open_pos);
 		ImGui::Text("XYZ Position");
-		glm::vec3 pos = fst.getPos();
+		glm::vec3 pos = objects[selected]->getPos();
 		bool did_pos_change = false;
-		ImGui::BeginDisabled(is_playing_anim);
+		ImGui::BeginDisabled(is_playing_anim[selected]);
 		did_pos_change |= ImGui::SliderFloat("<-x", &pos.x, -10, 10);
 		did_pos_change |= ImGui::SliderFloat("<-y", &pos.y, -10, 10);
 		did_pos_change |= ImGui::SliderFloat("<-z", &pos.z, -100, 0);
 		if (did_pos_change) {
-			fst.setPos(pos);
+			objects[selected]->setPos(pos);
 		}
 
 		ImGui::Separator();
 
 		ImGui::Text("Euler Angles");
-		glm::vec3 angle = fst.getAngles();
+		glm::vec3 angle = objects[selected]->getAngles();
 		bool did_angle_change = false;
 		did_angle_change |= ImGui::SliderFloat("<-yz", &angle.x, 0, 360);
 		did_angle_change |= ImGui::SliderFloat("<-xz", &angle.y, 0, 360);
 		did_angle_change |= ImGui::SliderFloat("<-xy", &angle.z, 0, 360);
 		if (did_angle_change) {
-			fst.setAngles(angle);
+			objects[selected]->setAngles(angle);
 		}
 		ImGui::EndDisabled();
 		ImGui::Separator();
 		ImGui::Text("Deformation");
-		glm::vec3 deformation = fst.getDeformation();
+		glm::vec3 deformation = objects[selected]->getDeformation();
 		bool did_deformation_change = false;
 		did_deformation_change |= ImGui::SliderFloat("<-x##deformation", &deformation.x, 0.001, 5);
 		did_deformation_change |= ImGui::SliderFloat("<-y##deformation", &deformation.y, 0.001, 5);
 		did_deformation_change |= ImGui::SliderFloat("<-z##deformation", &deformation.z, 0.001, 5);
 		if (did_deformation_change) {
-			fst.setDeformation(deformation);
+			objects[selected]->setDeformation(deformation);
 		}
 		ImGui::Separator();
 
 		ImGui::Text("Animation");
 		if(ImGui::Button("Reset animation")) {
-			prev_phase = 0;
+			prev_phase[selected] = 0;
 			speeds[selected] = DEFAULT_SPEED;
 			radiuses[selected] = DEFAULT_RADIUS;
 			angle_speeds[selected] = DEFAULT_ANGLE_SPEED;
 		}
-		ImGui::Checkbox("Enable Animation", &is_playing_anim);
+		bool v = is_playing_anim[selected] != 0;
+		if(ImGui::Checkbox("Enable Animation", &v)) {
+			is_playing_anim[selected] = v;
+		}
 
 		ImGui::SliderFloat("Radius", &radiuses[selected], 0.1, 10);
 		ImGui::SliderFloat("Speed", &speeds[selected], -10, 10);
@@ -136,30 +135,28 @@ void update([[maybe_unused]] double time) {
 	}
 	if (is_open_color) {
 		ImGui::Begin("Color", &is_open_color);
-			glm::vec3 c = fst.getColorMultiplier();
+			glm::vec3 c = objects[selected]->getColorMultiplier();
 			if (ImGui::ColorEdit3("multiplier", &c.x)) {
-				fst.setColorMultipiles(c);
+				objects[selected]->setColorMultipiles(c);
 			}
 
 			ImGui::Text("vertex color: (%.2f, %.2f, %.2f)", c.x, c.y, c.z);
 		ImGui::End();
 	}
-	if (is_playing_anim) { 
-		float dt = time - prev;
-		float current_phase = normalise(prev_phase + speeds[selected] / radiuses[selected] * dt);
+	for(std::size_t i = 0; i < objects.size(); ++i) {
+		if (is_playing_anim[i]) { 
+			float dt = time - prev;
+			float current_phase = normalise(prev_phase[i] + speeds[i] / radiuses[i] * dt);
 
-		//glm::vec3 velocity = {std::cos(elapsed), std::sin(elapsed), 0};
-		//velocity *= 30 * dt;
-
-		glm::vec3 dphi = angle_speeds[selected] * dt;
-		fst.setAngles(fst.getAngles() + dphi);
-		if(radiuses[selected] > 1e-10) {
-			glm::vec3 dr = speeds[selected] * glm::vec3(std::cos(current_phase), std::sin(current_phase), 0) * dt;
-			fst.setPos(fst.getPos() + dr);
+			glm::vec3 dphi = angle_speeds[i] * dt;
+			objects[i]->setAngles(objects[i]->getAngles() + dphi);
+			if(radiuses[i] > 1e-10) {
+				glm::vec3 dr = speeds[i] * glm::vec3(std::cos(current_phase), std::sin(current_phase), 0) * dt;
+				objects[i]->setPos(objects[i]->getPos() + dr);
+			}
+			prev_phase[i] = current_phase;
 		}
-		prev_phase = current_phase;
 	}
-	//objects.front()->setPos(fst.getPos() + velocity);
 	prev = time;
 
 	graphics::internal::updateGlobalUniformBuffers();
