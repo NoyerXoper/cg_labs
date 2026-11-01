@@ -42,41 +42,10 @@ struct Vertex {
 };
 
 struct GlobalUniforms {
-<<<<<<< Updated upstream
-	glm::mat4 matrix;
-	alignas(16) glm::vec3 color_multiply;
-};
-
-struct DirectionalLight {
-	alignas(16) glm::vec3 direction;
-	alignas(16) glm::vec3 color;
-};
-
-class Camera {
-public:
-	Camera(float speed, float sensitivity) noexcept;
-
-	glm::mat4 getView() const noexcept;	
-
-	void updateAngles(float dx, float dy) noexcept;
-	void updatePos(glm::vec3 move, float dt) noexcept;
-
-	glm::vec3 forward() const noexcept;
-	glm::vec3 up() const noexcept;
-	glm::vec3 right() const noexcept;
-private:
-	glm::vec3 pos;
-	glm::quat orientation{1, 0, 0, 0};
-
-	static constexpr float pitch_limit = glm::radians(89.0f);
-	float move_speed;
-	float sensitivity;
-=======
 	glm::mat4 perspective;
 	glm::mat4 view;
 	glm::mat4 model;
 	glm::vec3 color_multiply;
->>>>>>> Stashed changes
 };
 
 class Camera {
