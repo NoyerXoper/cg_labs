@@ -50,6 +50,7 @@ int main() {
 	}
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	bool is_first_frame = true;
 
 	glfw_window = glfwCreateWindow(default_window_width, default_window_height,
 	                               default_window_title, nullptr, nullptr);
@@ -90,14 +91,44 @@ int main() {
 		goto err_application_init;
 	}
 
+
+	double prev_mx;
+	double prev_my;
+
 	while (!glfwWindowShouldClose(glfw_window)) {
 		const double time = glfwGetTime();
 
 		glfwPollEvents();
 		ImGui_ImplGlfw_NewFrame();
 
+		double mx = 0;
+		double my = 0;
+		glfwGetCursorPos(glfw_window, &mx, &my);
+		if (is_first_frame) {
+			prev_mx = mx;
+			prev_my = my;
+			is_first_frame = false;
+		}
+		double mdx = 0;
+		double mdy = 0;
+		if (glfwGetMouseButton(glfw_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+			mdx = mx - prev_mx;
+			mdy = my - prev_my;
+		}
+		prev_mx = mx;
+		prev_my = my;
+
+		glm::vec3 dir(0);
+
+		if (glfwGetKey(glfw_window, GLFW_KEY_W) == GLFW_PRESS) dir.z += 1.0f;
+		if (glfwGetKey(glfw_window, GLFW_KEY_S) == GLFW_PRESS) dir.z -= 1.0f;
+		if (glfwGetKey(glfw_window, GLFW_KEY_D) == GLFW_PRESS) dir.x += 1.0f;
+		if (glfwGetKey(glfw_window, GLFW_KEY_A) == GLFW_PRESS) dir.x -= 1.0f;
+		if (glfwGetKey(glfw_window, GLFW_KEY_SPACE)      == GLFW_PRESS) dir.y += 1.0f;
+		if (glfwGetKey(glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) dir.y -= 1.0f;
+
 		ImGui::NewFrame();
-		application::update(time);
+		application::update(time, mdx, mdy, dir);
 		ImGui::Render();
 
 		graphics::internal::FrameData fd = graphics::internal::prepare();

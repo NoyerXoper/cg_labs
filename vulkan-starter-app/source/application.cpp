@@ -17,7 +17,7 @@ void shutdown() {
 	vkQueueWaitIdle(context.graphics_queue);
 }
 
-void update([[maybe_unused]] double time) {
+void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm::vec3 move_dir) {
 	static constexpr auto normalise = [](float angle) {
 		angle = std::fmod(angle, 2 * std::numbers::pi);
 		if (angle < 0) {
@@ -29,6 +29,8 @@ void update([[maybe_unused]] double time) {
 	static constexpr float DEFAULT_RADIUS = 3;
 	static constexpr glm::vec3 DEFAULT_ANGLE_SPEED{};
 	static float prev = 0;
+	static float prev_time = 0;
+	static bool is_first_frame = true;
 	static auto& objects = graphics::internal::VertexIndexStorage::objectsData();
 	static std::vector<float> prev_phase (objects.size(), 0);
 	// ImGui::ShowDemoWindow();
@@ -37,6 +39,17 @@ void update([[maybe_unused]] double time) {
 	static bool is_select_open = false;
 	static std::vector<char> is_playing_anim(objects.size(), 0);
 	static std::size_t selected = 0;
+	static double prev_mouse_x;
+	static double prev_mouse_y;
+
+	float dt = time - prev_time;
+	prev_time = time;
+
+	graphics::internal::context.cam.updateAngles(mouse_dx, mouse_dy);
+	if (glm::length(move_dir) > 1e-8) {
+		graphics::internal::context.cam.updatePos(glm::normalize(move_dir), dt);
+	}
+
 	if (objects.size() == 0) {
 		return;
 	}
@@ -225,6 +238,7 @@ void render(const graphics::internal::FrameData& fd, double time) {
 	};
 	vkCmdSetScissor(fd.command_buffer, 0, 1, &scissors);
 
+	/*
 	auto& scene_objects = graphics::internal::VertexIndexStorage::objectsData();
 
 	uint32_t drawn_verticies = 0;
@@ -245,6 +259,8 @@ void render(const graphics::internal::FrameData& fd, double time) {
 
 		drawn_verticies += scene_objects[i]->getIndex().size();
 	}
+		*/
+	graphics::internal::drawAllObjects(fd);
 
 	vkCmdEndRenderPass(fd.command_buffer);
 	vkEndCommandBuffer(fd.command_buffer);

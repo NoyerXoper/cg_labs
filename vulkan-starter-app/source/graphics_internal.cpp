@@ -8,6 +8,8 @@
 #include <fstream>
 #include <cstring>
 #include <ranges>
+#include <expected>
+
 #include <glm/gtx/string_cast.hpp>
 
 #include <vulkan/vulkan.h>
@@ -33,11 +35,58 @@
 
 namespace graphics::internal {
 
+std::vector<std::unique_ptr<UniformBufferStorage::TypeErasureBase>> UniformBufferStorage::buffers_ = {};
+
+Camera::Camera(float speed, float sensetivity) noexcept: move_speed(speed), sensitivity(sensetivity) {
+
+}
+
+glm::mat4 Camera::getView() const noexcept {
+	glm::mat4 rotation = glm::mat4_cast(glm::conjugate(orientation));
+	return glm::translate(rotation, -pos);
+}
+
+void Camera::updateAngles(float dx, float dy) noexcept {
+	float xz = -dx * sensitivity;
+	float yz = dy * sensitivity;
+
+	glm::quat quat_xz = glm::angleAxis(xz, glm::vec3(0, 1, 0));
+	glm::quat quat_yz = glm::angleAxis(yz, glm::vec3(1, 0, 0));
+
+	glm::quat candidate = quat_xz * orientation * quat_yz;
+
+	float sin_angle = glm::clamp((candidate * glm::vec3(0, 0, 1)).y, -1.0f, 1.0f);
+	if(std::abs(std::asin(sin_angle)) > pitch_limit) {
+		candidate = quat_xz * orientation;
+	}
+
+	orientation = candidate;
+}
+
+void Camera::updatePos(glm::vec3 move, float dt) {
+	glm::vec3 delta = right() * move.x + up() * move.y + forward() * move.z;
+	pos += delta * move_speed * dt;
+}
+
+glm::vec3 Camera::forward() const { 
+	return orientation * glm::vec3(0, 0, -1); 
+}
+
+glm::vec3 Camera::right()   const { 
+	return orientation * glm::vec3(1, 0, 0); 
+}
+
+glm::vec3 Camera::up() const { 
+	return orientation * glm::vec3(0, 1, 0); 
+}
+
 bool is_perspective = true;
 
 std::vector<uint32_t> VertexIndexStorage::index_data = {};
 std::vector<Vertex> VertexIndexStorage::vertex_data = {};
 std::vector<Pyramid*> VertexIndexStorage::objects = {};
+
+
 
 void VertexIndexStorage::registerFigure(Pyramid& obj) {
 	objects.push_back(&obj);
@@ -163,8 +212,8 @@ const glm::vec3& Pyramid::getColorMultiplier() const noexcept {
 	return color_multiply_;
 }
 
-glm::mat4 Pyramid::getMatrixTransform() const {
-	return (is_perspective ? getPerspective() : getOrtho()) * getModel();
+glm::mat4 Pyramid::getOrthoOrPerspective() const {
+	return (is_perspective ? getPerspective() : getOrtho());
 }
 
 glm::mat4 Pyramid::getRotationMatrix() const {
@@ -181,8 +230,8 @@ glm::mat4 Pyramid::getDeformationMatrix() const {
 
 glm::mat4 Pyramid::getPositionMatrix() const {
 	glm::mat4 mat =  glm::translate(glm::mat4(1), center_);
-	mat[1][1] *= -1;
-	mat[3][1] *= -1;
+	//mat[1][1] *= -1;
+	//mat[3][1] *= -1;
 	return mat;
 }
 
@@ -233,11 +282,6 @@ std::vector<VkFramebuffer> vk_imgui_framebuffers;
 VkCommandPool vk_imgui_command_pool;
 VkCommandBuffer vk_imgui_command_buffer;
 
-std::vector<VkBuffer> vk_uniform_global_buffers;
-std::vector<GlobalUniforms*> vk_uniform_global_memory;
-std::vector<VmaAllocation> vk_uniform_buffer_global_allocations;
-VkDescriptorSetLayout vk_descriptor_set_layout;
-VkDescriptorPool vk_uniform_buffer_descriptor_pool;
 // std::vector<VkDescriptorSet> vk_uniform_buffer_descriptor_set;
 
 VkShaderModule loadShaderModule(const char path[]) {
@@ -653,107 +697,27 @@ bool createIndexBufferForShaders() {
     return true;
 }
 
+std::vector<UniformBufferHandle<GlobalUniforms>> buffers;
 bool createUniformBuffer() {
-	// TOCHANGE - gota use multiple uniform structs
-	const VkBufferCreateInfo global_uniform_buffer_info = {
-		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-		.size = (sizeof(GlobalUniforms) + 0xf) & ~0xf,
-		.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-		.sharingMode = VK_SHARING_MODE_EXCLUSIVE
-	};
+	const std::size_t N = VertexIndexStorage::objectsData().size();
+	buffers.reserve(N);
 
-	const VmaAllocationCreateInfo global_uniform_buffer_allocation_info	{
-		.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-		.usage = VMA_MEMORY_USAGE_AUTO
-	};
-	uint32_t N = VertexIndexStorage::objectsData().size();
-	vk_uniform_global_buffers.resize(N);
-	vk_uniform_global_memory.resize(N);
-	context.uniform_descriptor_sets.resize(N);
-	vk_uniform_buffer_global_allocations.resize(N);
-	for (std::size_t i = 0; i < vk_uniform_global_buffers.size(); ++i) {
-		VmaAllocationInfo alloc_info{};
-
-		if (vmaCreateBuffer(context.allocator, &global_uniform_buffer_info, &global_uniform_buffer_allocation_info, &vk_uniform_global_buffers[i], &vk_uniform_buffer_global_allocations[i], &alloc_info) != VK_SUCCESS) {
-			std::cerr << "Couldn't create global uniform buffer";
+	for (std::size_t i = 0; i < N; ++i) {
+		std::expected<UniformBufferHandle<GlobalUniforms>, std::string> res = UniformBufferHandle<GlobalUniforms>::createBuffer(context.device, context.allocator);
+		if (!res) {
+			for(std::size_t j = 0; j < i; ++j) {
+				buffers[j].destroy();
+			}
+			std::cerr << res.error() << std::endl;
 			return false;
 		}
 
-		vk_uniform_global_memory[i] = reinterpret_cast<GlobalUniforms*>(alloc_info.pMappedData);
+		buffers.push_back(std::move(res.value()));
 	}
 
-	VkDescriptorSetLayoutBinding descriptor_set_bindings[] = {
-		{
-			.binding = 0,
-			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-		}
-	};
-
-	const VkDescriptorSetLayoutCreateInfo descripotr_set_layout_info {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		.bindingCount = sizeof(descriptor_set_bindings) / sizeof(descriptor_set_bindings[0]),
-		.pBindings = descriptor_set_bindings
-	};
-
-	if (vkCreateDescriptorSetLayout(context.device, &descripotr_set_layout_info, nullptr, &vk_descriptor_set_layout) != VK_SUCCESS) {
-		std::cerr << "Couldn't create descriptor set layout\n";
-		return false;
-	} 
-
-	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
-		{
-			.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			.descriptorCount = N,
-		}
-	};
-
-	const VkDescriptorPoolCreateInfo descriptor_pool_info {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = N,
-		.poolSizeCount = sizeof(descriptor_pool_sizes) / sizeof(descriptor_pool_sizes[0]),
-		.pPoolSizes = descriptor_pool_sizes
-	};
-
-	if (vkCreateDescriptorPool(context.device, &descriptor_pool_info, nullptr, &vk_uniform_buffer_descriptor_pool) != VK_SUCCESS) {
-		std::cerr << "Couldn't create desc pool for unifrom dyn buffer\n";
-		return false;
+	for (auto& buffer: buffers) {
+		UniformBufferStorage::registerBuffer(buffer);
 	}
-
-	std::vector<VkDescriptorSetLayout> layouts(N, vk_descriptor_set_layout);
-
-	VkDescriptorSetAllocateInfo descriptor_set_allocate_info {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-		.descriptorPool = vk_uniform_buffer_descriptor_pool,
-		.descriptorSetCount = N,
-		.pSetLayouts = layouts.data()
-	};
-
-	if(vkAllocateDescriptorSets(context.device, &descriptor_set_allocate_info, context.uniform_descriptor_sets.data()) != VK_SUCCESS) {
-		std::cerr << "Couldn't allocate desc set\n";
-		return false;
-	}
-
-	for(auto&& [buffer, set]: std::views::zip(vk_uniform_global_buffers, context.uniform_descriptor_sets)) {
-		VkDescriptorBufferInfo buffer_desc_info {
-			.buffer = buffer,
-			.offset = 0,
-			.range = sizeof(GlobalUniforms)
-		};
-
-		VkWriteDescriptorSet write_desc {
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = set,
-			.dstBinding = 0,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			.pBufferInfo = &buffer_desc_info
-		};
-
-		vkUpdateDescriptorSets(context.device, 1, &write_desc, 0, nullptr);
-	}
-
 	return true;
 }
 
@@ -837,7 +801,7 @@ bool createTriagonalPipeLine() {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.polygonMode = VK_POLYGON_MODE_FILL,
 		.cullMode = VK_CULL_MODE_BACK_BIT,
-		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.frontFace = VK_FRONT_FACE_CLOCKWISE,
 		.lineWidth = 1.0f
 	};
 
@@ -860,11 +824,11 @@ bool createTriagonalPipeLine() {
 		.attachmentCount = 1,
 		.pAttachments = &blend_attachment
 	};
-
+	auto desc_set_layouts = UniformBufferStorage::allLayouts();
 	VkPipelineLayoutCreateInfo layout_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = 1,
-		.pSetLayouts = &vk_descriptor_set_layout
+		.setLayoutCount = static_cast<uint32_t>(desc_set_layouts.size()),
+		.pSetLayouts = desc_set_layouts.data()
 	};
     if (vkCreatePipelineLayout(context.device, &layout_info, nullptr,
                                &context.pipeline_layout) != VK_SUCCESS) {
@@ -920,13 +884,40 @@ void registerPyramidsToStorage() {
 Context context;
 
 void updateGlobalUniformBuffers() {
-	std::size_t N = context.uniform_descriptor_sets.size();
+	std::size_t N = buffers.size();
 
 	for(std::size_t i = 0; i < N; ++i) {
-		vk_uniform_global_memory[i]->matrix = VertexIndexStorage::objectsData()[i]->getMatrixTransform();
-		vk_uniform_global_memory[i]->color_multiply = VertexIndexStorage::objectsData()[i]->getColorMultiplier();
-		vmaFlushAllocation(context.allocator, vk_uniform_buffer_global_allocations[i], 0, sizeof(GlobalUniforms));
+		buffers[i].data()->perspective = VertexIndexStorage::objectsData()[i]->getOrthoOrPerspective();
+		buffers[i].data()->view = context.cam.getView();
+		buffers[i].data()->model = VertexIndexStorage::objectsData()[i]->getModel();
+		buffers[i].data()->color_multiply = VertexIndexStorage::objectsData()[i]->getColorMultiplier();
+		vmaFlushAllocation(context.allocator, buffers[i].alloc(), 0, sizeof(GlobalUniforms));
 	}
+}
+
+void drawAllObjects(const FrameData& fd) {
+	auto& scene_objects = graphics::internal::VertexIndexStorage::objectsData();
+
+	uint32_t drawn_verticies = 0;
+
+	for (std::size_t i = 0; i < scene_objects.size(); ++i) {
+		const VkDescriptorSet set = buffers[i].descriptorSet();
+		vkCmdBindDescriptorSets(
+			fd.command_buffer, 
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			context.pipeline_layout,
+			0,
+			1,
+			&set,
+			0,
+			nullptr
+		);
+
+		vkCmdDrawIndexed(fd.command_buffer, scene_objects[i]->getIndex().size(), 1, drawn_verticies, 0, 0);
+
+		drawn_verticies += scene_objects[i]->getIndex().size();
+	}
+
 }
 
 void registerPyramid(const Pyramid& pir) noexcept {
@@ -1283,11 +1274,7 @@ void shutdown() {
 	vmaUnmapMemory(context.allocator, vertex_buffer_allocation);
 	vmaDestroyBuffer(context.allocator, context.vertex_buffer, vertex_buffer_allocation);
 	vmaDestroyBuffer(context.allocator, context.index_buffer, index_buffer_allocation);
-	for(auto&& [buffer, alloc]: std::views::zip(vk_uniform_global_buffers, vk_uniform_buffer_global_allocations)) {
-		vmaDestroyBuffer(context.allocator, buffer, alloc);
-	}
-	vkDestroyDescriptorPool(context.device, vk_uniform_buffer_descriptor_pool, nullptr);
-	vkDestroyDescriptorSetLayout(context.device, vk_descriptor_set_layout, nullptr);
+	UniformBufferStorage::destroy();
 	vmaDestroyAllocator(context.allocator);
 
 	vkDestroyDevice(context.device, nullptr);
