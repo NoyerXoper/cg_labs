@@ -35,7 +35,12 @@ struct Vertex {
 
 struct GlobalUniforms {
 	glm::mat4 matrix;
-	glm::vec3 color_multiply;
+	alignas(16) glm::vec3 color_multiply;
+};
+
+struct DirectionalLight {
+	alignas(16) glm::vec3 direction;
+	alignas(16) glm::vec3 color;
 };
 
 class Pyramid;

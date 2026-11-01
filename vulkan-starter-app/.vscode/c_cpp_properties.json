@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "compileCommands": "${workspaceFolder}/build-debug/compile_commands.json",
+            "cppStandard": "c++23",
+            "cStandard": "c17"
+        }
+    ],
+    "version": 4
+}
