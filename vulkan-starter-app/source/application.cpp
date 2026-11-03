@@ -39,6 +39,11 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 	static bool is_select_open = false;
 	static std::vector<char> is_playing_anim(objects.size(), 0);
 	static std::size_t selected = 0;
+	static auto& point_lights = graphics::internal::getPointBuffer();
+	static auto& proj_lights = graphics::internal::getProjBuffer();
+	static bool is_directional_light = false;
+	static bool is_showing_point_lights = false;
+	static bool is_showing_proj_lights = false;
 	static double prev_mouse_x;
 	static double prev_mouse_y;
 
@@ -61,9 +66,12 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 	if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Windows")) {
             ImGui::MenuItem("Select figure", nullptr, &is_select_open);
-            ImGui::MenuItem("Position & animation", nullptr, &is_open_pos);
+            ImGui::MenuItem("Object settings", nullptr, &is_open_pos);
             ImGui::MenuItem("Color",                nullptr, &is_open_color);
-            ImGui::MenuItem("Is perscpective",                nullptr, &graphics::internal::is_perspective);
+            ImGui::MenuItem("Is perscpective",                nullptr, &graphics::internal::Camera::is_persp);
+			ImGui::MenuItem("Directional light", nullptr, &is_directional_light);
+            ImGui::MenuItem("Point lights", nullptr, &is_showing_point_lights);
+			ImGui::MenuItem("Proj lights", nullptr, &is_showing_proj_lights);
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -96,7 +104,7 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 		ImGui::BeginDisabled(is_playing_anim[selected]);
 		did_pos_change |= ImGui::SliderFloat("<-x", &pos.x, -10, 10);
 		did_pos_change |= ImGui::SliderFloat("<-y", &pos.y, -10, 10);
-		did_pos_change |= ImGui::SliderFloat("<-z", &pos.z, -100, 0);
+		did_pos_change |= ImGui::SliderFloat("<-z", &pos.z, -100, 100);
 		if (did_pos_change) {
 			objects[selected]->setPos(pos);
 		}
@@ -144,6 +152,13 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 		ImGui::SliderFloat("xz angle speed", &angle_speeds[selected].y, -360, 360);
 		ImGui::SliderFloat("xy angle speed", &angle_speeds[selected].z, -360, 360);
 
+		ImGui::Separator();
+		ImGui::Text("Material");
+		ImGui::SliderFloat("ambient", &objects[selected]->getMaterial().ambient, 0, 1.0);
+		ImGui::SliderFloat("shiny", &objects[selected]->getMaterial().shiny, 0.0, 256.0);
+		ImGui::SliderFloat("specular", &objects[selected]->getMaterial().specular, 0, 12.0);
+
+
 		ImGui::End();
 	}
 	if (is_open_color) {
@@ -156,6 +171,125 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 			ImGui::Text("vertex color: (%.2f, %.2f, %.2f)", c.x, c.y, c.z);
 		ImGui::End();
 	}
+
+	if (is_directional_light) {
+		ImGui::Begin("Dir light");
+		ImGui::SliderFloat("<-x_dir", &graphics::internal::context.direction_light.x, -1, 1);
+		ImGui::SliderFloat("<-y_dir", &graphics::internal::context.direction_light.y, -1, 1);
+		ImGui::SliderFloat("<-z_dir", &graphics::internal::context.direction_light.z, -1, 1);
+
+		ImGui::ColorEdit3("Color", &graphics::internal::context.color_light.x);
+		ImGui::End();
+	}
+
+	if (is_showing_point_lights) {
+		ImGui::Begin("Point");
+		static std::size_t light_selected = 0;
+		if (point_lights.count() > 0) {
+			std::string preview = "Light " + std::to_string(light_selected);
+			if (ImGui::BeginCombo("##point_light", preview.c_str())) {
+				for (int i = 0; i < point_lights.count(); ++i) {
+					const bool is_selected = (light_selected == i);
+					std::string label = "Light " + std::to_string(i);
+					if (ImGui::Selectable(label.c_str(), is_selected)) {
+						light_selected = i;
+					}
+					if (is_selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::Separator();
+
+			ImGui::SliderFloat3("##Position", &point_lights[light_selected].position.x, -25.0f, 25.0f);
+			ImGui::ColorEdit3("##Color", &point_lights[light_selected].color.x);
+			ImGui::SliderFloat("##Itensity", &point_lights[light_selected].intensity, 0.0f, 5.0f);
+
+			ImGui::Separator();
+
+			if(ImGui::Button("Delete")) {
+				point_lights.popAt(light_selected);
+				if (light_selected > 0) --light_selected;
+			}
+
+		}
+
+		ImGui::Text("Create point light");
+		static graphics::internal::PointLight light = {
+			.position = {0, 0, 0},
+			.color = {1.0, 1.0, 1.0},
+			.intensity = 1.0f
+		};
+
+		ImGui::SliderFloat3("Position", &light.position.x, -25.0f, 25.0f);
+		ImGui::ColorEdit3("Color", &light.color.x);
+		ImGui::SliderFloat("Itensity", &light.intensity, 0.0f, 5.0f);
+
+		if (ImGui::Button("Add")) {
+			point_lights.pushBack(light);
+		}
+		ImGui::End();
+	}
+
+	if (is_showing_proj_lights) {
+		ImGui::Begin("Proj");
+		static std::size_t light_selected = 0;
+		if (point_lights.count() > 0) {
+			std::string preview = "Light " + std::to_string(light_selected);
+			if (ImGui::BeginCombo("##point_light", preview.c_str())) {
+				for (int i = 0; i < proj_lights.count(); ++i) {
+					const bool is_selected = (light_selected == i);
+					std::string label = "Light " + std::to_string(i);
+					if (ImGui::Selectable(label.c_str(), is_selected)) {
+						light_selected = i;
+					}
+					if (is_selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::Separator();
+
+			auto& cur = proj_lights[light_selected];
+
+			ImGui::SliderFloat3("Position", &cur.position.x, -25.0f, 25.0f);
+			ImGui::SliderFloat3("Direction", &cur.direction.x, -1.0f, 1.0f);
+			ImGui::ColorEdit3("Color", &cur.color.x);
+			ImGui::SliderFloat("Itensity", &cur.intensity, 0.0f, 5.0f);
+			ImGui::SliderAngle("Angle", &cur.angle, 0.0f, 90.0f);
+
+			if(ImGui::Button("Delete")) {
+				proj_lights.popAt(light_selected);
+				if (light_selected > 0) --light_selected;
+			}
+
+
+		}
+
+		ImGui::Text("Create proj light");
+		static graphics::internal::ProjectorLight light = {
+			.position = {0, 0, 0},
+			.direction = {1, 0, 0},
+			.color = {1.0, 1.0, 1.0},
+			.intensity = 1.0f,
+			.angle = std::numbers::pi / 4
+		};
+
+		ImGui::SliderFloat3("##Position", &light.position.x, -25.0f, 25.0f);
+		ImGui::SliderFloat3("##Direction", &light.direction.x, -1.0f, 1.0f);
+		ImGui::ColorEdit3("##Color", &light.color.x);
+		ImGui::SliderFloat("##Itensity", &light.intensity, 0.0f, 5.0f);
+		ImGui::SliderAngle("##Angle", &light.angle, 0.0f, 90.0f);
+
+		if (ImGui::Button("Add")) {
+			proj_lights.pushBack(light);
+		}
+		ImGui::End();
+
+	}
+
 	for(std::size_t i = 0; i < objects.size(); ++i) {
 		if (is_playing_anim[i]) { 
 			float dt = time - prev;
@@ -170,6 +304,7 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 			prev_phase[i] = current_phase;
 		}
 	}
+
 	prev = time;
 
 	graphics::internal::updateGlobalUniformBuffers();
@@ -224,9 +359,9 @@ void render(const graphics::internal::FrameData& fd, double time) {
 
 	VkViewport viewport = {
 		.x = 0.0f,
-		.y = 0.0f,
+		.y = static_cast<float>(graphics::internal::context.swapchain_extent.height),
 		.width = static_cast<float>(graphics::internal::context.swapchain_extent.width),
-		.height = static_cast<float>(graphics::internal::context.swapchain_extent.height),
+		.height = -static_cast<float>(graphics::internal::context.swapchain_extent.height),
 		.minDepth = 0.0f,
 		.maxDepth = 1.0f,
 	};
@@ -260,6 +395,7 @@ void render(const graphics::internal::FrameData& fd, double time) {
 		drawn_verticies += scene_objects[i]->getIndex().size();
 	}
 		*/
+
 	graphics::internal::drawAllObjects(fd);
 
 	vkCmdEndRenderPass(fd.command_buffer);

@@ -35,20 +35,40 @@
 
 namespace graphics::internal {
 
-std::vector<std::unique_ptr<UniformBufferStorage::TypeErasureBase>> UniformBufferStorage::buffers_ = {};
+std::vector<std::unique_ptr<BufferRegistry::TypeErasureBase>> BufferRegistry::buffers_ = {};
+
+bool Camera::is_persp = true;
 
 Camera::Camera(float speed, float sensetivity) noexcept: move_speed(speed), sensitivity(sensetivity) {
 
 }
 
+const glm::vec3& Camera::getPos() const noexcept {
+	return pos;
+}
+
+glm::mat4 Camera::getOrthoOrPerspective() const {
+	return (is_persp ? getPerspective() : getOrtho());
+}
+
+glm::mat4 Camera::getOrtho() const {
+	return glm::orthoRH_ZO(LEFT, RIGHT, BOTTOM, TOP, NEAR, FAR);
+}
+
+glm::mat4 Camera::getPerspective() const {
+	return glm::perspectiveRH_ZO(glm::radians(FOV_Y), ASPECT, NEAR, FAR);
+}
+
 glm::mat4 Camera::getView() const noexcept {
 	glm::mat4 rotation = glm::mat4_cast(glm::conjugate(orientation));
-	return glm::translate(rotation, -pos);
+	glm::mat4 res =  glm::translate(rotation, -pos);
+
+	return res;
 }
 
 void Camera::updateAngles(float dx, float dy) noexcept {
 	float xz = -dx * sensitivity;
-	float yz = dy * sensitivity;
+	float yz = -dy * sensitivity;
 
 	glm::quat quat_xz = glm::angleAxis(xz, glm::vec3(0, 1, 0));
 	glm::quat quat_yz = glm::angleAxis(yz, glm::vec3(1, 0, 0));
@@ -63,21 +83,24 @@ void Camera::updateAngles(float dx, float dy) noexcept {
 	orientation = candidate;
 }
 
-void Camera::updatePos(glm::vec3 move, float dt) {
+void Camera::updatePos(glm::vec3 move, float dt) noexcept {
 	glm::vec3 delta = right() * move.x + up() * move.y + forward() * move.z;
 	pos += delta * move_speed * dt;
 }
 
 glm::vec3 Camera::forward() const { 
-	return orientation * glm::vec3(0, 0, -1); 
+	glm::vec3 u = orientation * glm::vec3(0, 0, -1); 
+	u.y = 0;
+	return glm::normalize(u);
 }
 
 glm::vec3 Camera::right()   const { 
-	return orientation * glm::vec3(1, 0, 0); 
+	glm::vec3 u = orientation * glm::vec3(1, 0, 0); 
+	return glm::normalize(u);
 }
 
 glm::vec3 Camera::up() const { 
-	return orientation * glm::vec3(0, 1, 0); 
+	return glm::vec3(0, 1, 0); 
 }
 
 bool is_perspective = true;
@@ -118,20 +141,27 @@ const std::vector<Pyramid*>& VertexIndexStorage::objectsData() noexcept {
 	return objects;
 }
 
-Pyramid::Pyramid(const std::array<Vertex, 4>& verticies): center_(0), verticies_(verticies) {
-	for(Vertex& vert: verticies_) {
-		center_ += vert.position;
+Pyramid::Pyramid(const std::array<glm::vec3, 4>& verticies, const Material& material): center_(0), material_(material) {
+	for(const glm::vec3& vert: verticies) {
+		center_ += vert;
 	}
 	center_ /= 4;
 	float maxAbs = 0;
-	for (Vertex& vert: verticies_) {
+
+	std::array<Vertex, 4> vv;
+
+	for(auto&& [v, b]: std::views::zip(vv, verticies)) {
+		v = Vertex{b};
+	}
+
+	for (Vertex& vert: vv) {
 		vert.position -= center_;
 		maxAbs = std::max(maxAbs, std::abs(vert.position.x));
 		maxAbs = std::max(maxAbs, std::abs(vert.position.y));
 		maxAbs = std::max(maxAbs, std::abs(vert.position.z));
 	}
 	if (maxAbs > 0) {
-		for (Vertex& vert: verticies_) {
+		for (Vertex& vert: vv) {
 			vert.color = vert.position / maxAbs;
 			vert.color = (vert.color + 1.0f) * 0.5f;
 		}
@@ -142,26 +172,36 @@ Pyramid::Pyramid(const std::array<Vertex, 4>& verticies): center_(0), verticies_
 	}};
 	std::size_t i = 0;
 	for(auto [v0, v1, v2]: triangles) {
-		glm::vec3 vec1 = verticies_[v1].position - verticies_[v0].position;
-		glm::vec3 vec2 = verticies_[v2].position - verticies_[v0].position;
+		glm::vec3 vec1 = vv[v1].position - vv[v0].position;
+		glm::vec3 vec2 = vv[v2].position - vv[v0].position;
 		glm::vec3 norm = glm::cross(vec1, vec2);
-		glm::vec3 center = (verticies_[v0].position + verticies_[v1].position + verticies_[v2].position) / 3.0f;
+		glm::vec3 center = (vv[v0].position + vv[v1].position + vv[v2].position) / 3.0f;
 
-		if (glm::dot(norm, center) > 0) {
-			indexes_[i] = v0;
-			indexes_[i + 1] = v1;
-			indexes_[i + 2] = v2;
-		} else {
-			indexes_[i] = v1;
-			indexes_[i + 1] = v0;
-			indexes_[i + 2] = v2;
-		}
-		i += 3;
+		if (glm::dot(norm, center) < 0) {
+			std::swap(v0, v1);
+			norm *= -1;
+		} 
+
+		verticies_[i] = vv[v0];
+		verticies_[i].norm = norm;
+		i++;
+
+		verticies_[i] = vv[v1];
+		verticies_[i].norm = norm;
+		i++;
+
+		verticies_[i] = vv[v2];
+		verticies_[i].norm = norm;
+		i++;
 	}
+
+	for (uint32_t i = 0; i < 12; ++i) {
+        indexes_[i] = i;
+    }
 }
 
 
-const std::array<Vertex, 4>& Pyramid::getVertex() const noexcept {
+const std::array<Vertex, 12>& Pyramid::getVertex() const noexcept {
 	return verticies_;
 }
 
@@ -196,6 +236,10 @@ void Pyramid::setColorMultipiles(const glm::vec3& mult) noexcept {
 	color_multiply_ = mult;
 }
 
+Material& Pyramid::getMaterial() noexcept {
+	return material_;
+}
+
 const glm::vec3& Pyramid::getAngles() const noexcept {
 	return angles_;
 }
@@ -212,9 +256,6 @@ const glm::vec3& Pyramid::getColorMultiplier() const noexcept {
 	return color_multiply_;
 }
 
-glm::mat4 Pyramid::getOrthoOrPerspective() const {
-	return (is_perspective ? getPerspective() : getOrtho());
-}
 
 glm::mat4 Pyramid::getRotationMatrix() const {
 	return glm::eulerAngleXYZ(
@@ -230,8 +271,6 @@ glm::mat4 Pyramid::getDeformationMatrix() const {
 
 glm::mat4 Pyramid::getPositionMatrix() const {
 	glm::mat4 mat =  glm::translate(glm::mat4(1), center_);
-	//mat[1][1] *= -1;
-	//mat[3][1] *= -1;
 	return mat;
 }
 
@@ -239,13 +278,6 @@ glm::mat4 Pyramid::getModel() const {
 	return getPositionMatrix() * getRotationMatrix() * getDeformationMatrix();
 }
 
-glm::mat4 Pyramid::getOrtho() const {
-	return glm::orthoRH_ZO(LEFT, RIGHT, BOTTOM, TOP, NEAR, FAR);
-}
-
-glm::mat4 Pyramid::getPerspective() const {
-	return glm::perspectiveRH_ZO(glm::radians(FOV_Y), ASPECT, NEAR, FAR);
-}
 
 namespace {
 
@@ -697,13 +729,63 @@ bool createIndexBufferForShaders() {
     return true;
 }
 
-std::vector<UniformBufferHandle<GlobalUniforms>> buffers;
+std::vector<BufferHandle<ObjectUnifrom>> buffers;
+BufferHandle<FrameUniform> frame_buffer;
+VkDescriptorPool desc_unifrom_pool = VK_NULL_HANDLE;
+VkDescriptorSetLayout object_unifrom_layout = VK_NULL_HANDLE;
+VkDescriptorSetLayout frame_unifrom_layout = VK_NULL_HANDLE;
+
 bool createUniformBuffer() {
 	const std::size_t N = VertexIndexStorage::objectsData().size();
+
+	auto layout_res = BufferHandle<ObjectUnifrom>::createLayout(context.device);
+
+	if (!layout_res.has_value()) {
+		std::cerr << layout_res.error() << "\n";
+		return false;
+	}
+
+	object_unifrom_layout = layout_res.value();
+
+	layout_res = BufferHandle<FrameUniform>::createLayout(context.device);
+
+	if (!layout_res.has_value()) {
+		std::cerr << layout_res.error() << "\n";
+		return false;
+	}
+
+	frame_unifrom_layout = layout_res.value();
+
+	const VkDescriptorPoolSize pool_size = {
+		.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = N + 1 
+	};
+	const VkDescriptorPoolCreateInfo pool_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.maxSets = N + 1,
+		.poolSizeCount = 1,
+		.pPoolSizes = &pool_size
+	};
+	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
+								&desc_unifrom_pool) != VK_SUCCESS) {
+		return false;
+	}
+
 	buffers.reserve(N);
 
+	auto res = BufferHandle<FrameUniform>::createBuffer(context.device, desc_unifrom_pool, frame_unifrom_layout, context.allocator);
+
+	if (!res) {
+		std::cerr << res.error() << std::endl;
+		return false;
+	}
+
+	frame_buffer = std::move(res.value());
+
+	BufferRegistry::registerBuffer(frame_buffer);
+
 	for (std::size_t i = 0; i < N; ++i) {
-		std::expected<UniformBufferHandle<GlobalUniforms>, std::string> res = UniformBufferHandle<GlobalUniforms>::createBuffer(context.device, context.allocator);
+		std::expected<BufferHandle<ObjectUnifrom>, std::string> res = BufferHandle<ObjectUnifrom>::createBuffer(context.device, desc_unifrom_pool, object_unifrom_layout, context.allocator);
 		if (!res) {
 			for(std::size_t j = 0; j < i; ++j) {
 				buffers[j].destroy();
@@ -716,8 +798,89 @@ bool createUniformBuffer() {
 	}
 
 	for (auto& buffer: buffers) {
-		UniformBufferStorage::registerBuffer(buffer);
+		BufferRegistry::registerBuffer(buffer);
 	}
+	return true;
+}
+
+
+ArrayBuffer<PointLight> point_lights;
+ArrayBuffer<ProjectorLight> proj_lights;
+VkDescriptorPool desc_storage_pool = VK_NULL_HANDLE;
+VkDescriptorSetLayout point_storage_layout = VK_NULL_HANDLE;
+VkDescriptorSetLayout proj_storage_layout = VK_NULL_HANDLE;
+bool createStorageBuffers() {
+	constexpr uint32_t MAX_CAPACITY = 2048;
+
+	auto layout_res = ArrayBuffer<PointLight>::createLayout(context.device);
+
+	if (!layout_res.has_value()) {
+		std::cerr << layout_res.error() << "\n";
+		return false;
+	}
+
+	point_storage_layout = layout_res.value();
+
+	layout_res = ArrayBuffer<PointLight>::createLayout(context.device);
+
+	if (!layout_res.has_value()) {
+		std::cerr << layout_res.error() << "\n";
+		return false;
+	}
+
+	proj_storage_layout = layout_res.value();
+
+	/*
+	layout_res = ArrayBuffer<PointLight>::createLayout(context.device);
+
+	if (!layout_res.has_value()) {
+		std::cerr << layout_res.error() << "\n";
+		return false;
+	}
+
+	proj_storage_layout = layout_res.value();
+	*/
+	const VkDescriptorPoolSize pool_size = {
+		.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 2
+	};
+	const VkDescriptorPoolCreateInfo pool_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.maxSets = 2,
+		.poolSizeCount = 1,
+		.pPoolSizes = &pool_size
+	};
+	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
+								&desc_storage_pool) != VK_SUCCESS) {
+		return false;
+	}
+
+	auto res_point = ArrayBuffer<PointLight>::createBuffer(context.device, desc_storage_pool, point_storage_layout, context.allocator, MAX_CAPACITY);
+
+	if (!res_point) {
+		std::cerr << res_point.error() << std::endl;
+		return false;
+	}
+
+	point_lights = std::move(res_point.value());
+
+
+	BufferRegistry::registerBuffer(point_lights);
+
+	point_lights.pushBack({{0, 0, 0}, {1.0, 0.0, 0.0}, 5.0f});
+
+	auto res_proj = ArrayBuffer<ProjectorLight>::createBuffer(context.device, desc_storage_pool, proj_storage_layout, context.allocator, MAX_CAPACITY);
+	if (!res_proj) {
+		std::cerr << res_proj.error() << std::endl;
+		return false;
+	}
+
+	proj_lights = std::move(res_proj.value());
+
+	BufferRegistry::registerBuffer(proj_lights);
+
+	proj_lights.pushBack({{0, 0, 20}, {0, 0, 1}, {0.0, 1.0, 1.0}, 30.0f, glm::radians(45.0f)});
+
 	return true;
 }
 
@@ -751,7 +914,7 @@ bool createTriagonalPipeLine() {
 		.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
 	};
 
-	VkVertexInputAttributeDescription attributes[2] = {
+	VkVertexInputAttributeDescription attributes[] = {
 		{
 			.location = 0,
 			.binding = 0,
@@ -763,7 +926,12 @@ bool createTriagonalPipeLine() {
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
 			.offset = offsetof(Vertex, color)
-
+		},
+		{
+			.location = 2,
+			.binding = 0,
+			.format = VK_FORMAT_R32G32B32_SFLOAT,
+			.offset = offsetof(Vertex, norm)
 		}
 	};
 
@@ -771,7 +939,7 @@ bool createTriagonalPipeLine() {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		.vertexBindingDescriptionCount = 1,
 		.pVertexBindingDescriptions = &binding,
-		.vertexAttributeDescriptionCount = 2,
+		.vertexAttributeDescriptionCount = sizeof(attributes)/sizeof(attributes[0]),
 		.pVertexAttributeDescriptions = attributes
 	};
 
@@ -801,7 +969,7 @@ bool createTriagonalPipeLine() {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.polygonMode = VK_POLYGON_MODE_FILL,
 		.cullMode = VK_CULL_MODE_BACK_BIT,
-		.frontFace = VK_FRONT_FACE_CLOCKWISE,
+		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.lineWidth = 1.0f
 	};
 
@@ -824,11 +992,16 @@ bool createTriagonalPipeLine() {
 		.attachmentCount = 1,
 		.pAttachments = &blend_attachment
 	};
-	auto desc_set_layouts = UniformBufferStorage::allLayouts();
+	VkDescriptorSetLayout desc_set_layouts[] = {
+		frame_unifrom_layout,
+		object_unifrom_layout,
+		point_storage_layout,
+		proj_storage_layout
+	};
 	VkPipelineLayoutCreateInfo layout_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = static_cast<uint32_t>(desc_set_layouts.size()),
-		.pSetLayouts = desc_set_layouts.data()
+		.setLayoutCount = sizeof(desc_set_layouts) / sizeof(desc_set_layouts[0]),
+		.pSetLayouts = desc_set_layouts
 	};
     if (vkCreatePipelineLayout(context.device, &layout_info, nullptr,
                                &context.pipeline_layout) != VK_SUCCESS) {
@@ -886,12 +1059,20 @@ Context context;
 void updateGlobalUniformBuffers() {
 	std::size_t N = buffers.size();
 
+	frame_buffer->perspective = context.cam.getOrthoOrPerspective();
+	frame_buffer->view = context.cam.getView();
+	frame_buffer->camera_pos = context.cam.getPos();
+	frame_buffer->direction_light = context.direction_light;
+	frame_buffer->color_light = context.color_light;
+	vmaFlushAllocation(context.allocator, frame_buffer.alloc(), 0, sizeof(FrameUniform));
+
 	for(std::size_t i = 0; i < N; ++i) {
-		buffers[i].data()->perspective = VertexIndexStorage::objectsData()[i]->getOrthoOrPerspective();
-		buffers[i].data()->view = context.cam.getView();
-		buffers[i].data()->model = VertexIndexStorage::objectsData()[i]->getModel();
-		buffers[i].data()->color_multiply = VertexIndexStorage::objectsData()[i]->getColorMultiplier();
-		vmaFlushAllocation(context.allocator, buffers[i].alloc(), 0, sizeof(GlobalUniforms));
+		//buffers[i].data()->perspective = VertexIndexStorage::objectsData()[i]->getOrthoOrPerspective();
+		//buffers[i].data()->view = context.cam.getView();
+		buffers[i]->model = VertexIndexStorage::objectsData()[i]->getModel();
+		buffers[i]->color_multiply = VertexIndexStorage::objectsData()[i]->getColorMultiplier();
+		buffers[i]->material = VertexIndexStorage::objectsData()[i]->getMaterial();
+		vmaFlushAllocation(context.allocator, buffers[i].alloc(), 0, sizeof(ObjectUnifrom));
 	}
 }
 
@@ -899,6 +1080,16 @@ void drawAllObjects(const FrameData& fd) {
 	auto& scene_objects = graphics::internal::VertexIndexStorage::objectsData();
 
 	uint32_t drawn_verticies = 0;
+	const VkDescriptorSet frame_set = frame_buffer.descriptorSet();
+
+	const VkDescriptorSet point_light_set = point_lights.descriptorSet();
+
+	const VkDescriptorSet proj_light_set = proj_lights.descriptorSet();
+
+	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 0, 1, &frame_set, 0, nullptr);
+
+	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 2, 1, &point_light_set, 0, nullptr);
+	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 3, 1, &proj_light_set, 0, nullptr);
 
 	for (std::size_t i = 0; i < scene_objects.size(); ++i) {
 		const VkDescriptorSet set = buffers[i].descriptorSet();
@@ -906,7 +1097,7 @@ void drawAllObjects(const FrameData& fd) {
 			fd.command_buffer, 
 			VK_PIPELINE_BIND_POINT_GRAPHICS,
 			context.pipeline_layout,
-			0,
+			1,
 			1,
 			&set,
 			0,
@@ -1145,6 +1336,11 @@ bool initialize(GLFWwindow* const window) {
 		return false;
 
 	}
+
+	if(!createStorageBuffers()) {
+		std::cerr << "Couldn't create storage buffer\n";
+		return false;
+	}
 	if(!createTriagonalPipeLine()) {
 		std::cerr << "Couldn't create pipline for triangle\n";
 		return false;
@@ -1274,7 +1470,10 @@ void shutdown() {
 	vmaUnmapMemory(context.allocator, vertex_buffer_allocation);
 	vmaDestroyBuffer(context.allocator, context.vertex_buffer, vertex_buffer_allocation);
 	vmaDestroyBuffer(context.allocator, context.index_buffer, index_buffer_allocation);
-	UniformBufferStorage::destroy();
+	BufferRegistry::destroy();
+	vkDestroyDescriptorSetLayout(context.device, frame_unifrom_layout, nullptr);
+	vkDestroyDescriptorSetLayout(context.device, object_unifrom_layout, nullptr);
+	vkDestroyDescriptorPool(context.device, desc_unifrom_pool, nullptr);
 	vmaDestroyAllocator(context.allocator);
 
 	vkDestroyDevice(context.device, nullptr);
@@ -1292,6 +1491,14 @@ void resize(uint32_t width, uint32_t height) {
 	vk_swapchain_resize_height = height;
 
 	vk_swapchain_resize_require = true;
+}
+
+ArrayBuffer<PointLight>& getPointBuffer() {
+	return point_lights;
+}
+
+ArrayBuffer<ProjectorLight>& getProjBuffer() {
+	return proj_lights;
 }
 
 FrameData prepare() {
