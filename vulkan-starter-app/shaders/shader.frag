@@ -7,8 +7,8 @@ layout(location = 2) in vec3 inWorldPos;
 layout(location = 0) out vec4 outColor;
 
 struct Material {
+    vec3 specular;
     float ambient;
-    float specular;
     float shiny;
 };
 
@@ -24,6 +24,7 @@ struct ProjectorLight {
     vec3 color;
     float itensity;
     float angle;
+    float outer_angle;
 
 };
 
@@ -41,12 +42,12 @@ layout(std140, set = 1, binding = 0) uniform ObjectUniform {
     Material material;
 } object_uniforms;
 
-layout(std430, set = 2, binding = 0) readonly buffer PointLightBuffer {
+layout(std430, set = 0, binding = 1) readonly buffer PointLightBuffer {
     uint size;
     PointLight lights[];
 } pl;
 
-layout(std430, set = 3, binding = 0) readonly buffer ProjLightBuffer {
+layout(std430, set = 0, binding = 2) readonly buffer ProjLightBuffer {
     uint size;
     ProjectorLight lights[];
 } proj;
@@ -69,7 +70,7 @@ vec3 applyDirectional(vec3 N, vec3 V) {
     if (NdotL > 0) {
         float diff_multiplier = NdotL;
         diff = diff_multiplier * frame_uniforms.light_color * inColor;
-        float spec_mult = object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny);
+        vec3 spec_mult = object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny);
         spec = spec_mult * frame_uniforms.light_color;
     }
 
@@ -103,7 +104,7 @@ vec3 applyPoint(vec3 N, vec3 V) {
         if (NdotL > 0) {
             float diff_multiplier = NdotL * color_itensity / (L_length * L_length);
             diff += diff_multiplier * light_color * inColor;
-            float spec_mult = object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny) * color_itensity / (L_length * L_length);
+            vec3 spec_mult = object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny) * color_itensity / (L_length * L_length);
             spec += spec_mult * light_color;
         }
     }
@@ -122,6 +123,7 @@ vec3 applyProject(vec3 N, vec3 V) {
         vec3 light_color = proj.lights[i].color;
         float color_itensity = proj.lights[i].itensity;
         float angle = proj.lights[i].angle;
+        float outer_angle = proj.lights[i].outer_angle;
 
         vec3 L_non_normal = light_pos - inWorldPos;
 
@@ -135,23 +137,30 @@ vec3 applyProject(vec3 N, vec3 V) {
         }
 
         float cos_angle = cos(angle);
+        float cos_outer_angle = cos(outer_angle);
+        float cos_point = -dot(L, light_dir);
 
-        if (cos_angle > 0) {
-            float proj_length = dot(-L_non_normal, light_dir);
+        float fall_off_edge = 1.0f;
 
-            float upper = proj_length / cos_angle;
+        if (cos_angle > 0 && cos_outer_angle > 0 && cos_angle > cos_outer_angle) {
 
-            if (L_length > upper) {
+            if (cos_point < cos_outer_angle) {
                 continue;
+            } 
+            if (cos_point < cos_angle) {
+                fall_off_edge = (cos_point - cos_outer_angle) / (cos_angle - cos_outer_angle);
+                fall_off_edge = clamp(fall_off_edge, 0.0, 1.0);
             }
+        } else {
+            continue; // wrong projector
         }
 
         float NdotL = max(dot(N, L), 0.0);
         float NdotH = max(dot(N, H), 0.0);
         if (NdotL > 0) {
-            float diff_multiplier = NdotL * color_itensity / (L_length * L_length);
+            float diff_multiplier = fall_off_edge * NdotL * color_itensity / (L_length * L_length);
             diff += diff_multiplier * light_color * inColor;
-            float spec_mult = object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny) * color_itensity / (L_length * L_length);
+            vec3 spec_mult = fall_off_edge * object_uniforms.material.specular * pow(NdotH, object_uniforms.material.shiny) * color_itensity / (L_length * L_length);
             spec += spec_mult * light_color;
         }
     }

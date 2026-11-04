@@ -1,8 +1,8 @@
 #version 450
 
 struct Material {
+    vec3 specular;
     float ambient;
-    float specular;
     float shiny;
 };
 
