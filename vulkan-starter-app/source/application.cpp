@@ -154,9 +154,8 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 
 		ImGui::Separator();
 		ImGui::Text("Material");
-		ImGui::SliderFloat("ambient", &objects[selected]->getMaterial().ambient, 0, 1.0);
 		ImGui::SliderFloat("shiny", &objects[selected]->getMaterial().shiny, 0.0, 256.0);
-		ImGui::SliderFloat("specular", &objects[selected]->getMaterial().specular, 0, 12.0);
+		ImGui::ColorEdit3("specular", &objects[selected]->getMaterial().specular.x);
 
 
 		ImGui::End();
@@ -179,6 +178,7 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 		ImGui::SliderFloat("<-z_dir", &graphics::internal::context.direction_light.z, -1, 1);
 
 		ImGui::ColorEdit3("Color", &graphics::internal::context.color_light.x);
+		ImGui::SliderFloat("ambient", &graphics::internal::context.ambient, 0, 1.0);
 		ImGui::End();
 	}
 
@@ -204,7 +204,7 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 
 			ImGui::SliderFloat3("##Position", &point_lights[light_selected].position.x, -25.0f, 25.0f);
 			ImGui::ColorEdit3("##Color", &point_lights[light_selected].color.x);
-			ImGui::SliderFloat("##Itensity", &point_lights[light_selected].intensity, 0.0f, 5.0f);
+			ImGui::SliderFloat("##Itensity", &point_lights[light_selected].intensity, 0.0f, 50.0f);
 
 			ImGui::Separator();
 
@@ -224,7 +224,7 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 
 		ImGui::SliderFloat3("Position", &light.position.x, -25.0f, 25.0f);
 		ImGui::ColorEdit3("Color", &light.color.x);
-		ImGui::SliderFloat("Itensity", &light.intensity, 0.0f, 5.0f);
+		ImGui::SliderFloat("Itensity", &light.intensity, 0.0f, 50.0f);
 
 		if (ImGui::Button("Add")) {
 			point_lights.pushBack(light);
@@ -234,15 +234,15 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 
 	if (is_showing_proj_lights) {
 		ImGui::Begin("Proj");
-		static std::size_t light_selected = 0;
-		if (point_lights.count() > 0) {
-			std::string preview = "Light " + std::to_string(light_selected);
+		static std::size_t light_selected_proj = 0;
+		if (proj_lights.count() > 0) {
+			std::string preview = "Light " + std::to_string(light_selected_proj);
 			if (ImGui::BeginCombo("##point_light", preview.c_str())) {
 				for (int i = 0; i < proj_lights.count(); ++i) {
-					const bool is_selected = (light_selected == i);
+					const bool is_selected = (light_selected_proj == i);
 					std::string label = "Light " + std::to_string(i);
 					if (ImGui::Selectable(label.c_str(), is_selected)) {
-						light_selected = i;
+						light_selected_proj = i;
 					}
 					if (is_selected) {
 						ImGui::SetItemDefaultFocus();
@@ -252,17 +252,19 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 			}
 			ImGui::Separator();
 
-			auto& cur = proj_lights[light_selected];
+			auto& cur = proj_lights[light_selected_proj];
 
 			ImGui::SliderFloat3("Position", &cur.position.x, -25.0f, 25.0f);
 			ImGui::SliderFloat3("Direction", &cur.direction.x, -1.0f, 1.0f);
 			ImGui::ColorEdit3("Color", &cur.color.x);
-			ImGui::SliderFloat("Itensity", &cur.intensity, 0.0f, 5.0f);
+			ImGui::SliderFloat("Itensity", &cur.intensity, 0.0f, 50.0f);
 			ImGui::SliderAngle("Angle", &cur.angle, 0.0f, 90.0f);
+			cur.outer_angle = std::max(cur.angle, cur.outer_angle);
+			ImGui::SliderAngle("Outer angle", &cur.outer_angle, glm::degrees(cur.angle), 90.0f);
 
 			if(ImGui::Button("Delete")) {
-				proj_lights.popAt(light_selected);
-				if (light_selected > 0) --light_selected;
+				proj_lights.popAt(light_selected_proj);
+				if (light_selected_proj > 0) --light_selected_proj;
 			}
 
 
@@ -274,14 +276,17 @@ void update([[maybe_unused]] double time, double mouse_dx, double mouse_dy, glm:
 			.direction = {1, 0, 0},
 			.color = {1.0, 1.0, 1.0},
 			.intensity = 1.0f,
-			.angle = std::numbers::pi / 4
+			.angle = std::numbers::pi / 4,
+			.outer_angle = std::numbers::pi / 3,
 		};
 
 		ImGui::SliderFloat3("##Position", &light.position.x, -25.0f, 25.0f);
 		ImGui::SliderFloat3("##Direction", &light.direction.x, -1.0f, 1.0f);
 		ImGui::ColorEdit3("##Color", &light.color.x);
-		ImGui::SliderFloat("##Itensity", &light.intensity, 0.0f, 5.0f);
+		ImGui::SliderFloat("##Itensity", &light.intensity, 0.0f, 50.0f);
 		ImGui::SliderAngle("##Angle", &light.angle, 0.0f, 90.0f);
+		light.outer_angle = std::max(light.angle, light.outer_angle);
+		ImGui::SliderAngle("##Outer angle", &light.outer_angle, glm::degrees(light.angle), 90.0f);
 
 		if (ImGui::Button("Add")) {
 			proj_lights.pushBack(light);

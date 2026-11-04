@@ -2,7 +2,6 @@
 
 struct Material {
     vec3 specular;
-    float ambient;
     float shiny;
 };
 
@@ -20,6 +19,7 @@ layout(std140, set = 0, binding = 0) uniform FrameUniform {
     vec3 camera_pos;
     vec3 direction_light;
     vec3 color_light;
+    float ambient;
 } frame_uniforms;
 
 layout(std140, set = 1, binding = 0) uniform ObjectUniform {

@@ -32,7 +32,7 @@ int main() {
 			glm::vec3 {-15.0f,  -6.0f, 51.0f},
 			glm::vec3 {15.0f,  -6.0f, 51.0f},
 			glm::vec3 {0.0f,  -6.0f, 77.0f},
-		}, {0.25, 1.5, 64.0}
+		}, {{0.25, 0.25, 0.25}, 64.0}
 	});
 
 	graphics::internal::registerPyramid(graphics::internal::Pyramid{
@@ -41,7 +41,7 @@ int main() {
 			glm::vec3 {-15.0f / 5,  -6.0f / 5, -51.0f / 5},
 			glm::vec3 {15.0f / 5,  -6.0f / 5, -51.0f / 5},
 			glm::vec3 {0.0f,  -6.0f / 5, -77.0f / 5},
-		}, {0.1, 1.5, 256.0}
+		}, {{0.1, 0.1, 0.1}, 256.0}
 	});
 
 	if (!glfwInit()) {

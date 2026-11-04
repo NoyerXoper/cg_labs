@@ -731,49 +731,133 @@ bool createIndexBufferForShaders() {
 
 std::vector<BufferHandle<ObjectUnifrom>> buffers;
 BufferHandle<FrameUniform> frame_buffer;
-VkDescriptorPool desc_unifrom_pool = VK_NULL_HANDLE;
-VkDescriptorSetLayout object_unifrom_layout = VK_NULL_HANDLE;
-VkDescriptorSetLayout frame_unifrom_layout = VK_NULL_HANDLE;
+VkDescriptorPool desc_pool = VK_NULL_HANDLE;
+
+VkDescriptorSetLayout stage_layout = VK_NULL_HANDLE;
+VkDescriptorSetLayout object_layout = VK_NULL_HANDLE;
+
+VkDescriptorSet stage_set;
+std::vector<VkDescriptorSet> object_sets;
+
+bool createDescriptorPool() {
+	const uint32_t N = VertexIndexStorage::objectsData().size();
+	const VkDescriptorPoolSize pool_sizes[] = {
+		{
+			.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.descriptorCount = N + 1 
+		},
+		{
+			.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 2
+		}
+	};
+
+	const VkDescriptorPoolCreateInfo pool_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.maxSets = N + 1 + 2,
+		.poolSizeCount = sizeof(pool_sizes)/sizeof(pool_sizes[0]),
+		.pPoolSizes = pool_sizes
+	};
+	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
+								&desc_pool) != VK_SUCCESS) {
+		return false;
+	}
+	return true;
+}
+
+bool createDescriptorSetLayouts() {
+	const uint32_t N = VertexIndexStorage::objectsData().size();
+	VkDescriptorSetLayoutBinding stage_bindings[] = {
+	{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+	},
+	{
+		.binding = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+	},
+	{
+		.binding = 2,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+	}
+	};
+	VkDescriptorSetLayoutCreateInfo info_stage{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = sizeof(stage_bindings)/sizeof(stage_bindings[0]),
+		.pBindings = stage_bindings,
+	};
+	if (vkCreateDescriptorSetLayout(context.device, &info_stage, nullptr, &stage_layout) != VK_SUCCESS) {
+		std::cerr << "Couldn't create desc set layout for stage";
+		return false;
+	}
+
+	VkDescriptorSetLayoutBinding object_bindings[] = {
+	{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+	},
+	};
+	VkDescriptorSetLayoutCreateInfo info_object{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = sizeof(object_bindings)/sizeof(object_bindings[0]),
+		.pBindings = object_bindings,
+	};
+	if (vkCreateDescriptorSetLayout(context.device, &info_object, nullptr, &object_layout) != VK_SUCCESS) {
+		std::cerr << "Couldn't create desc set layout for objects";
+		return false;
+	}
+
+	return true;
+
+}
+
+bool createDescriptorSets() {
+	const uint32_t N = VertexIndexStorage::objectsData().size();
+	const VkDescriptorSetAllocateInfo set_alloc_stage = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = desc_pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts = &stage_layout,
+	};
+	if (vkAllocateDescriptorSets(context.device, &set_alloc_stage, &stage_set) != VK_SUCCESS) {
+		std::cerr << "Couldn't allocate descriptor set for stage\n";
+		return false;
+	}
+
+	std::vector<VkDescriptorSetLayout> layouts(N, object_layout);
+
+	const VkDescriptorSetAllocateInfo set_alloc_object = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = desc_pool,
+		.descriptorSetCount = N,
+		.pSetLayouts = layouts.data(),
+	};
+
+	object_sets.resize(N);
+
+	if (vkAllocateDescriptorSets(context.device, &set_alloc_object, object_sets.data()) != VK_SUCCESS) {
+		std::cerr << "Couldn't allocate descriptor set for objects\n";
+		return false;
+	}
+
+	return true;
+
+}
 
 bool createUniformBuffer() {
 	const std::size_t N = VertexIndexStorage::objectsData().size();
 
-	auto layout_res = BufferHandle<ObjectUnifrom>::createLayout(context.device);
-
-	if (!layout_res.has_value()) {
-		std::cerr << layout_res.error() << "\n";
-		return false;
-	}
-
-	object_unifrom_layout = layout_res.value();
-
-	layout_res = BufferHandle<FrameUniform>::createLayout(context.device);
-
-	if (!layout_res.has_value()) {
-		std::cerr << layout_res.error() << "\n";
-		return false;
-	}
-
-	frame_unifrom_layout = layout_res.value();
-
-	const VkDescriptorPoolSize pool_size = {
-		.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		.descriptorCount = N + 1 
-	};
-	const VkDescriptorPoolCreateInfo pool_info = {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = N + 1,
-		.poolSizeCount = 1,
-		.pPoolSizes = &pool_size
-	};
-	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
-								&desc_unifrom_pool) != VK_SUCCESS) {
-		return false;
-	}
-
 	buffers.reserve(N);
 
-	auto res = BufferHandle<FrameUniform>::createBuffer(context.device, desc_unifrom_pool, frame_unifrom_layout, context.allocator);
+	auto res = BufferHandle<FrameUniform>::createBuffer(context.device, context.allocator, stage_set, 0);
 
 	if (!res) {
 		std::cerr << res.error() << std::endl;
@@ -785,7 +869,7 @@ bool createUniformBuffer() {
 	BufferRegistry::registerBuffer(frame_buffer);
 
 	for (std::size_t i = 0; i < N; ++i) {
-		std::expected<BufferHandle<ObjectUnifrom>, std::string> res = BufferHandle<ObjectUnifrom>::createBuffer(context.device, desc_unifrom_pool, object_unifrom_layout, context.allocator);
+		std::expected<BufferHandle<ObjectUnifrom>, std::string> res = BufferHandle<ObjectUnifrom>::createBuffer(context.device, context.allocator, object_sets[i], 0);
 		if (!res) {
 			for(std::size_t j = 0; j < i; ++j) {
 				buffers[j].destroy();
@@ -795,23 +879,18 @@ bool createUniformBuffer() {
 		}
 
 		buffers.push_back(std::move(res.value()));
+		BufferRegistry::registerBuffer(buffers.back());
 	}
 
-	for (auto& buffer: buffers) {
-		BufferRegistry::registerBuffer(buffer);
-	}
 	return true;
 }
 
 
 ArrayBuffer<PointLight> point_lights;
 ArrayBuffer<ProjectorLight> proj_lights;
-VkDescriptorPool desc_storage_pool = VK_NULL_HANDLE;
-VkDescriptorSetLayout point_storage_layout = VK_NULL_HANDLE;
-VkDescriptorSetLayout proj_storage_layout = VK_NULL_HANDLE;
 bool createStorageBuffers() {
 	constexpr uint32_t MAX_CAPACITY = 2048;
-
+	/*
 	auto layout_res = ArrayBuffer<PointLight>::createLayout(context.device);
 
 	if (!layout_res.has_value()) {
@@ -829,6 +908,7 @@ bool createStorageBuffers() {
 	}
 
 	proj_storage_layout = layout_res.value();
+	*/
 
 	/*
 	layout_res = ArrayBuffer<PointLight>::createLayout(context.device);
@@ -840,22 +920,8 @@ bool createStorageBuffers() {
 
 	proj_storage_layout = layout_res.value();
 	*/
-	const VkDescriptorPoolSize pool_size = {
-		.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 2
-	};
-	const VkDescriptorPoolCreateInfo pool_info = {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = 2,
-		.poolSizeCount = 1,
-		.pPoolSizes = &pool_size
-	};
-	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
-								&desc_storage_pool) != VK_SUCCESS) {
-		return false;
-	}
 
-	auto res_point = ArrayBuffer<PointLight>::createBuffer(context.device, desc_storage_pool, point_storage_layout, context.allocator, MAX_CAPACITY);
+	auto res_point = ArrayBuffer<PointLight>::createBuffer(context.device, context.allocator, stage_set, MAX_CAPACITY, 1);
 
 	if (!res_point) {
 		std::cerr << res_point.error() << std::endl;
@@ -869,7 +935,7 @@ bool createStorageBuffers() {
 
 	point_lights.pushBack({{0, 0, 0}, {1.0, 0.0, 0.0}, 5.0f});
 
-	auto res_proj = ArrayBuffer<ProjectorLight>::createBuffer(context.device, desc_storage_pool, proj_storage_layout, context.allocator, MAX_CAPACITY);
+	auto res_proj = ArrayBuffer<ProjectorLight>::createBuffer(context.device, context.allocator, stage_set, MAX_CAPACITY, 2);
 	if (!res_proj) {
 		std::cerr << res_proj.error() << std::endl;
 		return false;
@@ -879,7 +945,7 @@ bool createStorageBuffers() {
 
 	BufferRegistry::registerBuffer(proj_lights);
 
-	proj_lights.pushBack({{0, 0, 20}, {0, 0, 1}, {0.0, 1.0, 1.0}, 30.0f, glm::radians(45.0f)});
+	proj_lights.pushBack({{0, 0, 20}, {0, 0, 1}, {0.0, 1.0, 1.0}, 30.0f, glm::radians(45.0f), glm::radians(60.0f)});
 
 	return true;
 }
@@ -993,10 +1059,8 @@ bool createTriagonalPipeLine() {
 		.pAttachments = &blend_attachment
 	};
 	VkDescriptorSetLayout desc_set_layouts[] = {
-		frame_unifrom_layout,
-		object_unifrom_layout,
-		point_storage_layout,
-		proj_storage_layout
+		stage_layout,
+		object_layout
 	};
 	VkPipelineLayoutCreateInfo layout_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -1064,6 +1128,7 @@ void updateGlobalUniformBuffers() {
 	frame_buffer->camera_pos = context.cam.getPos();
 	frame_buffer->direction_light = context.direction_light;
 	frame_buffer->color_light = context.color_light;
+	frame_buffer->ambient = context.ambient;
 	vmaFlushAllocation(context.allocator, frame_buffer.alloc(), 0, sizeof(FrameUniform));
 
 	for(std::size_t i = 0; i < N; ++i) {
@@ -1086,10 +1151,7 @@ void drawAllObjects(const FrameData& fd) {
 
 	const VkDescriptorSet proj_light_set = proj_lights.descriptorSet();
 
-	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 0, 1, &frame_set, 0, nullptr);
-
-	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 2, 1, &point_light_set, 0, nullptr);
-	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 3, 1, &proj_light_set, 0, nullptr);
+	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics::internal::context.pipeline_layout, 0, 1, &stage_set, 0, nullptr);
 
 	for (std::size_t i = 0; i < scene_objects.size(); ++i) {
 		const VkDescriptorSet set = buffers[i].descriptorSet();
@@ -1322,6 +1384,22 @@ bool initialize(GLFWwindow* const window) {
 		std::cerr << "Failed to create Vulkan render pass\n";
 		return false;
 	}
+
+	if (!createDescriptorPool()) {
+		std::cerr << "Couldn't create descriptor pool\n";
+		return false;
+	}
+
+	if (!createDescriptorSetLayouts()) {
+		std::cerr << "Couldn't create descriptor layouts\n";
+		return false;
+	}
+
+	if (!createDescriptorSets()) {
+		std::cerr << "Couldn't create descriptor sets\n";
+		return false;
+	}
+
 	if(!createVertexBufferForShaders()) {
 		std::cerr << "Couldn't create memory buffer for vertex\n";
 		return false;
@@ -1471,9 +1549,9 @@ void shutdown() {
 	vmaDestroyBuffer(context.allocator, context.vertex_buffer, vertex_buffer_allocation);
 	vmaDestroyBuffer(context.allocator, context.index_buffer, index_buffer_allocation);
 	BufferRegistry::destroy();
-	vkDestroyDescriptorSetLayout(context.device, frame_unifrom_layout, nullptr);
-	vkDestroyDescriptorSetLayout(context.device, object_unifrom_layout, nullptr);
-	vkDestroyDescriptorPool(context.device, desc_unifrom_pool, nullptr);
+	vkDestroyDescriptorSetLayout(context.device, stage_layout, nullptr);
+	vkDestroyDescriptorSetLayout(context.device, object_layout, nullptr);
+	vkDestroyDescriptorPool(context.device, desc_pool, nullptr);
 	vmaDestroyAllocator(context.allocator);
 
 	vkDestroyDevice(context.device, nullptr);

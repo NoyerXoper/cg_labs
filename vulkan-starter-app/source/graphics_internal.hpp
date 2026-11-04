@@ -50,11 +50,11 @@ struct ProjectorLight {
     alignas(16) glm::vec3 color;
     float intensity;
     float angle;
+    float outer_angle;
 };
 
 struct Material {
-    float ambient;
-    float specular;
+    alignas(16) glm::vec3 specular;
     float shiny;
 };
 
@@ -70,6 +70,7 @@ struct FrameUniform {
 	alignas(16) glm::vec3 camera_pos;
 	alignas(16) glm::vec3 direction_light;
 	alignas(16) glm::vec3 color_light;
+    float ambient;
 };
 
 struct ObjectUnifrom {
@@ -170,7 +171,6 @@ struct Context {
 	VkExtent2D swapchain_extent;
 
 	VkRenderPass render_pass;
-	// TRIAG
 	VkPipeline pipeline;
 	VkPipelineLayout pipeline_layout;
 	VkBuffer vertex_buffer;
@@ -183,7 +183,7 @@ struct Context {
 
 	glm::vec3 direction_light{-0.3f, -1.0f, -0.5f};
 	glm::vec3 color_light{1.0f, 1.0f, 1.0f};
-	// END TRIAG
+    float ambient = 0.3f;
 };
 
 struct FrameData {
@@ -195,6 +195,8 @@ enum class BufferType: std::size_t {
 	Uniform = 0,
 	Storage = 1
 };
+
+
 
 namespace {
 inline constexpr std::array descriptor_type_for{
@@ -235,6 +237,7 @@ public:
 		}
         return *this;
     }
+    
     ~BufferStorage() { 
 		destroy(); 
 	}
@@ -260,17 +263,16 @@ public:
     }
 
     static std::expected<BufferStorage, std::string>
-    create(VkDevice device, VkDescriptorPool pool,
-           VkDescriptorSetLayout layout, VmaAllocator allocator,
-           VkDeviceSize size)
+    create(VkDevice device, VmaAllocator allocator, VkDescriptorSet desc_set,
+           VkDeviceSize size, uint32_t binding)
     {
         size = (size + 0xf) & ~0xf;
 
         BufferStorage h;
         h.device_ = device;
         h.allocator_ = allocator;
-        h.desc_pool_ = pool;
-        h.desc_set_layout_ = layout;
+        //h.desc_pool_ = pool;
+        //h.desc_set_layout_ = layout;
         h.size_ = size;
 
         const VkBufferCreateInfo buf_info = {
@@ -290,7 +292,8 @@ public:
             return std::unexpected("Couldn't create buffer");
         }
         h.data_ = reinterpret_cast<std::byte*>(vma_info.pMappedData);
-
+        h.desc_set_ = desc_set;
+        /*
         const VkDescriptorSetAllocateInfo set_alloc = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = h.desc_pool_,
@@ -301,6 +304,7 @@ public:
             h.destroy();
             return std::unexpected("Couldn't allocate descriptor set");
         }
+        */
 
         const VkDescriptorBufferInfo buf_desc = {
             .buffer = h.buffer_,
@@ -310,7 +314,7 @@ public:
         const VkWriteDescriptorSet write = {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet  = h.desc_set_,
-            .dstBinding = 0,
+            .dstBinding = binding,
             .descriptorCount = 1,
             .descriptorType = desc_type,
             .pBufferInfo = &buf_desc,
@@ -419,10 +423,9 @@ public:
     ~BufferHandle() = default;
 
 	static std::expected<BufferHandle, std::string>
-    createBuffer(VkDevice device, VkDescriptorPool pool,
-                 VkDescriptorSetLayout layout, VmaAllocator allocator)
+    createBuffer(VkDevice device, VmaAllocator allocator, VkDescriptorSet set, uint32_t binding)
     {
-        auto base = Base::create(device, pool, layout, allocator, sizeof(T));
+        auto base = Base::create(device, allocator, set, sizeof(T), binding);
         if (!base) return std::unexpected(base.error());
 
         BufferHandle h;
@@ -481,12 +484,12 @@ public:
 	static std::expected<ArrayBuffer, std::string>
     createBuffer(
         VkDevice device, 
-        VkDescriptorPool pool, 
-        VkDescriptorSetLayout layout, 
         VmaAllocator allocator, 
-        uint32_t count
+        VkDescriptorSet set,
+        uint32_t count,
+        uint32_t binding
     ) {
-        auto base = Base::create(device, pool, layout, allocator, VkDeviceSize(sizeof(T)) * count + header_size);
+        auto base = Base::create(device, allocator, set, VkDeviceSize(sizeof(T)) * count + header_size, binding);
         if (!base) return std::unexpected(base.error());
 
         ArrayBuffer h;

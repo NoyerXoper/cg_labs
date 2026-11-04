@@ -8,7 +8,6 @@ layout(location = 0) out vec4 outColor;
 
 struct Material {
     vec3 specular;
-    float ambient;
     float shiny;
 };
 
@@ -34,6 +33,7 @@ layout(std140, set = 0, binding = 0) uniform FrameUniform {
     vec3 camera_pos;
     vec3 light_direction;
     vec3 light_color;
+    float ambient;
 } frame_uniforms;
 
 layout(std140, set = 1, binding = 0) uniform ObjectUniform {
@@ -53,7 +53,7 @@ layout(std430, set = 0, binding = 2) readonly buffer ProjLightBuffer {
 } proj;
 
 vec3 applyAmbient(vec3 N, vec3 V) {
-    return object_uniforms.material.ambient * inColor;
+    return frame_uniforms.ambient * frame_uniforms.light_color * inColor;
 }
 
 vec3 applyDirectional(vec3 N, vec3 V) {
